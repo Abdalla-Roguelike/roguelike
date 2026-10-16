@@ -251,6 +251,13 @@ body::before{
 .menu-sub{color:var(--text2);font-style:italic;margin:5px 0 22px}.menu-actions{display:grid;gap:8px;max-width:300px;margin:auto}.menu-actions .btn{font-size:16px;padding:10px}
 .modal{display:none;position:fixed;inset:0;background:rgba(2,2,8,.78);z-index:10001;align-items:center;justify-content:center;padding:16px}.modal.active{display:flex}.modal-box{text-align:left}.modal-box h2{font-family:'IM Fell English SC',serif;color:var(--gold-l);margin-bottom:8px}.modal-box p{color:var(--text2);line-height:1.5;margin:7px 0}.modal-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:15px}.stat-line{display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;color:var(--text2)}
 #combat-feedback{position:fixed;left:50%;top:48%;transform:translate(-50%,-50%);z-index:10002;pointer-events:none;font-family:'IM Fell English SC',serif;font-size:34px;font-weight:bold;text-align:center;text-shadow:0 3px 8px #000;opacity:0}.combat-feedback.show{animation:combatFloat 1.35s ease-out forwards}.combat-feedback.good{color:#5dde8a}.combat-feedback.bad{color:#e74c3c}.combat-feedback.crit{color:#f0c060;font-size:40px}@keyframes combatFloat{0%{opacity:0;transform:translate(-50%,-30%) scale(.65)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}100%{opacity:0;transform:translate(-50%,-95%) scale(1)}}
+
+/* RESUMO DO TURNO */
+.rs-grid{display:grid;grid-template-columns:repeat(3,26px);gap:3px;justify-content:center;margin:6px auto 4px}
+.rs-cell{width:26px;height:26px;border-radius:3px;border:1px solid #262438;background:#0f0f1c;font-size:13px;line-height:24px;text-align:center}
+.rs-cell.atk{background:#2a0c0c;border-color:#7a2a2a}.rs-cell.cov{background:#0c2a3a;border-color:#2a7aaa}.rs-cell.stun{background:#2a2208;border-color:#8a7020}
+.rs-cell.wpn{background:#0c1a0a;border-color:#2a6a2a}.rs-cell.tip{background:#2a2200;border-color:var(--gold)}.rs-cell.grip{background:#06182c;border-color:#1a4a7a}
+.rs-legend{font-size:10px;color:var(--text3);margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -308,8 +315,8 @@ body::before{
     <div class="leg-i"><div class="leg-sq" style="background:#5ab4f5"></div>Mercador</div>
     <div class="leg-i"><div class="leg-sq" style="background:#2a5a4a"></div>Saída</div>
   </div>
-  <div class="map-wrap"><canvas id="map-cv" width="700" height="460"></canvas></div>
-  <div class="ctrl-hint">Setas/WASD para mover · Clique no inimigo adjacente · 🔥 descansa · 🧙 negocia · Elites dão armas</div>
+  <div class="map-wrap"><canvas id="map-cv" width="690" height="450"></canvas></div>
+  <div class="ctrl-hint">Setas/WASD para mover · Clique no inimigo adjacente · Guardiões bloqueiam as portas · 🔥 descansa · 🧙 negocia · Elites dão armas</div>
   <div class="dpad">
     <div></div><button class="db" onclick="mv(0,-1)">▲</button><div></div>
     <button class="db" onclick="mv(-1,0)">◄</button>
@@ -403,8 +410,8 @@ body::before{
 </div>
 
 <div class="modal" id="tutorial-modal"><div class="modal-box">
-  <h2>Tutorial</h2><p>Escolha uma arma e elimine os inimigos normais para abrir a saída. Elites são opcionais e deixam recompensas melhores.</p>
-  <p>No combate, os 9 quadrados centrais são seguros. Posicionar uma parte da arma fora deles causa penalidade de dano. O inimigo alterna os padrões 1, 2, 3 e defesa, mas revela apenas parte do ataque.</p>
+  <h2>Tutorial</h2><p>Você começa numa câmara quadrada com quatro portas, cada uma bloqueada por um guardião. Atrás de cada porta há uma ala com corredores e salas: baús, fogueira, mercador, elite e a saída ficam lá dentro. Elimine os inimigos normais para abrir a saída. Elites são opcionais e deixam recompensas melhores.</p>
+  <p>No combate, os 9 quadrados centrais são seguros. Posicionar uma parte da arma fora deles causa penalidade de dano. O inimigo alterna os padrões 1, 2, 3 e defesa, mas a névoa esconde parte do campo: casas com “?” podem esconder ataques. Acertos limpos em sequência formam combo (+1 e +2 de dano) e revelam mais casas na rodada seguinte.</p>
   <p>Use o escudo para bloquear todo o dano e recuperar 1 de vida; ele entra em recarga por 3 turnos.</p>
   <div class="modal-actions"><button class="btn gbtn" onclick="closeModal('tutorial-modal')">Entendi</button></div>
 </div></div>
@@ -801,138 +808,295 @@ function skipChoice(){
 }
 
 // ─────────────────────────────────────────────
-// MAP GENERATION — Hybrid: rooms + maze + loops
+// MAP GENERATION — sala central + 4 alas protegidas por guardiões
 // ─────────────────────────────────────────────
-function generateFloor(){
-  const W=23,H=17;
-  let map=[];
-  // Seed randomly 45% floor
-  for(let y=0;y<H;y++){
-    map.push([]);
-    for(let x=0;x<W;x++){
-      let wall=(x===0||x===W-1||y===0||y===H-1)||Math.random()<0.45;
-      map[y].push({type:wall?'wall':'floor',visible:false,visited:false});
-    }
-  }
-  // Cellular automata smoothing (4 passes)
-  function countN(x,y){
-    let c=0;
-    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
-      if(!dx&&!dy)continue;
-      let nx=x+dx,ny=y+dy;
-      if(nx<0||nx>=W||ny<0||ny>=H||map[ny][nx].type==='wall')c++;
-    }
-    return c;
-  }
-  for(let pass=0;pass<4;pass++){
-    let next=map.map(row=>row.map(c=>({...c})));
-    for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++)
-      next[y][x].type=countN(x,y)>=5?'wall':'floor';
-    map=next;
-  }
-  for(let x=0;x<W;x++){map[0][x].type='wall';map[H-1][x].type='wall';}
-  for(let y=0;y<H;y++){map[y][0].type='wall';map[y][W-1].type='wall';}
+// A sala inicial é quadrada (7×7) e tem 4 saídas (N, L, S, O). Cada saída é
+// bloqueada por um guardião. Atrás de cada guardião existe uma "ala" isolada das
+// outras: corredor → sala grande → corredor → segunda sala (+ alcova opcional).
+// Baús, fogueira, mercador, elite e a saída só existem dentro das alas, então
+// nada disso é alcançável sem derrotar ao menos um guardião. O gerador valida
+// essas regras (busca em largura) e descarta qualquer mapa que as viole.
+const MAP_W=71,MAP_H=59,VIEW_W=23,VIEW_H=15,TS=30;
+const DIR_NAMES=['Norte','Leste','Sul','Oeste'];
+const ORTHO=[[0,-1],[1,0],[0,1],[-1,0]];
+function rndInt(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function pickOne(arr){return arr[Math.floor(Math.random()*arr.length)];}
+function shuffleArr(arr){for(let i=arr.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
 
-  // Flood-fill largest region
-  function flood(sx,sy){
-    let vis=new Set(),q=[{x:sx,y:sy}];
-    while(q.length){
-      let {x,y}=q.shift();let k=y*W+x;
-      if(vis.has(k))continue;vis.add(k);
-      for(let[dx,dy]of[[0,-1],[0,1],[-1,0],[1,0]]){
-        let nx=x+dx,ny=y+dy;
-        if(nx>=0&&nx<W&&ny>=0&&ny<H&&map[ny][nx].type==='floor'&&!vis.has(ny*W+nx))q.push({x:nx,y:ny});
+// simple=true gera alas só com uma sala (plano B caso o layout completo falhe várias vezes)
+function tryBuildFloor(simple){
+  const W=MAP_W,H=MAP_H,cx=Math.floor(W/2),cy=Math.floor(H/2);
+  const map=[];
+  for(let y=0;y<H;y++){map.push([]);for(let x=0;x<W;x++)map[y].push({type:'wall',visible:false,visited:false,room:-1,wing:-2});}
+  const rooms=[];
+  // Cada ala é desenhada num referencial local: a = distância para fora a partir da sala
+  // inicial, p = deslocamento lateral (+p = sentido horário). A mesma lógica gira 4 vezes.
+  const toGrid=[
+    (a,p)=>({x:cx+p,y:cy-a}),
+    (a,p)=>({x:cx+a,y:cy+p}),
+    (a,p)=>({x:cx-p,y:cy+a}),
+    (a,p)=>({x:cx-a,y:cy-p})
+  ];
+  const rectArea=(d,a0,a1,p0,p1)=>{
+    const c1=toGrid[d](a0,p0),c2=toGrid[d](a1,p1);
+    return {x0:Math.min(c1.x,c2.x),x1:Math.max(c1.x,c2.x),y0:Math.min(c1.y,c2.y),y1:Math.max(c1.y,c2.y)};
+  };
+  const areaFree=(r,m)=>{
+    if(r.x0-m<1||r.y0-m<1||r.x1+m>W-2||r.y1+m>H-2)return false;
+    for(let y=r.y0-m;y<=r.y1+m;y++)for(let x=r.x0-m;x<=r.x1+m;x++)
+      if(map[y][x].type!=='wall')return false;
+    return true;
+  };
+  // Um corredor só pode encostar em paredes, nele mesmo e nas salas que ele deve ligar.
+  const corridorOk=(cells,allowed)=>{
+    const own=new Set(cells.map(c=>c.y*W+c.x));
+    for(const c of cells){
+      if(map[c.y][c.x].type!=='wall')return false;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        const nx=c.x+dx,ny=c.y+dy;
+        if(nx<1||ny<1||nx>W-2||ny>H-2)return false;
+        if(own.has(ny*W+nx))continue;
+        const n=map[ny][nx];
+        if(n.type==='wall')continue;
+        if(n.room>=0&&allowed.has(n.room))continue;
+        return false;
       }
     }
-    return vis;
+    return true;
+  };
+  const carveCorridor=(cells,wing)=>{for(const c of cells){const m=map[c.y][c.x];m.type='floor';m.room=-1;m.wing=wing;}};
+  const carveRoom=(r,kind,wing,shape,loc)=>{
+    const id=rooms.length,room={id,kind,wing,r,loc,cells:[]};
+    for(let y=r.y0;y<=r.y1;y++)for(let x=r.x0;x<=r.x1;x++){const c=map[y][x];c.type='floor';c.room=id;c.wing=wing;}
+    if(shape==='chamfer'){ // corta os 4 cantos (3 casas cada) para a sala não ser um retângulo perfeito
+      for(const [x,y,sx,sy] of [[r.x0,r.y0,1,1],[r.x1,r.y0,-1,1],[r.x0,r.y1,1,-1],[r.x1,r.y1,-1,-1]])
+        for(const [ox,oy] of [[0,0],[1,0],[0,1]]){const c=map[y+oy*sy][x+ox*sx];c.type='wall';c.room=-1;c.wing=-2;}
+    }
+    rooms.push(room);return room;
+  };
+  const pickShape=()=>simple?'rect':pickOne(['rect','rect','chamfer']);
+
+  // ── sala inicial 7×7 ──
+  const hubRoom=carveRoom({x0:cx-3,x1:cx+3,y0:cy-3,y1:cy+3},'hub',-1,'rect',null);
+
+  // ── alas ──
+  const side=Math.random()<.5?1:-1; // todas as segundas salas giram no mesmo sentido: cada uma ocupa um canto
+  const wings=[];
+  function buildWing(d){
+    const g=toGrid[d];
+    for(let attempt=0;attempt<50;attempt++){
+      const L=rndInt(3,5);
+      const c1=[];for(let a=4;a<=4+L;a++)c1.push(g(a,0)); // c1[0] = porta na parede da sala inicial
+      const alongA=pickOne([7,9,11]),crossA=pickOne([9,11,13]);
+      const aA0=4+L+1,aA1=aA0+alongA-1;
+      const pA0=-rndInt(2,crossA-3),pA1=pA0+crossA-1;
+      const rA=rectArea(d,aA0,aA1,pA0,pA1);
+      if(!areaFree(rA,2)||!corridorOk(c1,new Set([hubRoom.id])))continue;
+      carveCorridor(c1,d);
+      const A=carveRoom(rA,'A',d,pickShape(),{a0:aA0,a1:aA1,p0:pA0,p1:pA1});
+      const w={d,rooms:[A],door:c1[0],closets:[]};
+      if(!simple){
+        for(let t=0;t<30;t++){
+          const M=rndInt(3,5),aC=rndInt(aA0+2,aA1-2);
+          const alongB=pickOne([7,9,11]),crossB=pickOne([7,9,11]);
+          const aB0=aC-rndInt(2,alongB-3),aB1=aB0+alongB-1;
+          const cells=[];let pB0,pB1;
+          if(side>0){for(let k=1;k<=M;k++)cells.push(g(aC,pA1+k));pB0=pA1+M+1;pB1=pB0+crossB-1;}
+          else{for(let k=1;k<=M;k++)cells.push(g(aC,pA0-k));pB1=pA0-M-1;pB0=pB1-crossB+1;}
+          const rB=rectArea(d,aB0,aB1,pB0,pB1);
+          if(!areaFree(rB,2)||!corridorOk(cells,new Set([A.id])))continue;
+          carveCorridor(cells,d);
+          const B=carveRoom(rB,'B',d,pickShape(),{a0:aB0,a1:aB1,p0:pB0,p1:pB1});
+          w.rooms.push(B);
+          // segundo corredor entre A e B cria um laço dentro da ala (sem abrir caminho para outras alas)
+          if(Math.random()<.65){
+            const lo=Math.max(aA0,aB0)+2,hi=Math.min(aA1,aB1)-2,opts=[];
+            for(let a=lo;a<=hi;a++)if(Math.abs(a-aC)>=4)opts.push(a);
+            if(opts.length){
+              const a2=pickOne(opts),c2=[];
+              for(let k=1;k<=M;k++)c2.push(side>0?g(a2,pA1+k):g(a2,pA0-k));
+              if(corridorOk(c2,new Set([A.id,B.id])))carveCorridor(c2,d);
+            }
+          }
+          break;
+        }
+      }
+      return w;
+    }
+    return null;
   }
-  let first=null;
-  for(let y=1;y<H-1&&!first;y++)for(let x=1;x<W-1&&!first;x++)
-    if(map[y][x].type==='floor')first={x,y};
-  if(!first){for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++)map[y][x].type='floor';first={x:1,y:1};}
-  let main=flood(first.x,first.y);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++)
-    if(map[y][x].type==='floor'&&!main.has(y*W+x))map[y][x].type='wall';
+  for(const d of shuffleArr([0,1,2,3])){const w=buildWing(d);if(!w)return null;wings[d]=w;}
 
-  // Punch extra loops
-  let loops=Math.floor(main.size*0.1);
-  for(let i=0;i<loops*4&&loops>0;i++){
-    let wx=1+Math.floor(Math.random()*(W-2)),wy=1+Math.floor(Math.random()*(H-2));
-    if(map[wy][wx].type!=='wall')continue;
-    let fn=[[0,-1],[0,1],[-1,0],[1,0]].filter(([dx,dy])=>{
-      let nx=wx+dx,ny=wy+dy;return nx>=0&&nx<W&&ny>=0&&ny<H&&map[ny][nx].type==='floor';
-    });
-    if(fn.length>=2){map[wy][wx].type='floor';loops--;}
+  // ── alcova (3×3) ligada por 2 casas de corredor, usada para esconder baús ──
+  function addCloset(w,room){
+    const g=toGrid[w.d],L=room.loc;
+    for(let t=0;t<40;t++){
+      const [da,dp]=pickOne([[1,0],[-1,0],[0,1],[0,-1]]);
+      const cells=[];let cr;
+      if(da!==0){
+        const q=rndInt(L.p0+2,L.p1-2),ea=da>0?L.a1:L.a0;
+        for(let k=1;k<=2;k++)cells.push(g(ea+da*k,q));
+        cr=rectArea(w.d,Math.min(ea+da*3,ea+da*5),Math.max(ea+da*3,ea+da*5),q-1,q+1);
+      }else{
+        const q=rndInt(L.a0+2,L.a1-2),ep=dp>0?L.p1:L.p0;
+        for(let k=1;k<=2;k++)cells.push(g(q,ep+dp*k));
+        cr=rectArea(w.d,q-1,q+1,Math.min(ep+dp*3,ep+dp*5),Math.max(ep+dp*3,ep+dp*5));
+      }
+      if(!areaFree(cr,2)||!corridorOk(cells,new Set([room.id])))continue;
+      carveCorridor(cells,w.d);
+      const cl=carveRoom(cr,'closet',w.d,'rect',null);
+      w.closets.push(cl);return cl;
+    }
+    return null;
+  }
+  const themes=shuffleArr(['exit','elite','rest','loot']); // o que cada ala guarda
+  if(!simple){
+    for(let d=0;d<4;d++){
+      const w=wings[d];
+      if(themes[d]==='loot')w.closet=addCloset(w,w.rooms[w.rooms.length-1]);
+      if(themes[d]==='elite')w.closet=addCloset(w,w.rooms[0]);
+    }
   }
 
-  G.map=map;G.mapW=W;G.mapH=H;
-  let interior=[];
-  for(let y=2;y<H-2;y++)for(let x=2;x<W-2;x++)if(map[y][x].type==='floor')interior.push({x,y});
-  if(!interior.length)interior=[first];
-  let sp=interior[Math.floor(Math.random()*interior.length)];
-  G.pos={x:sp.x,y:sp.y};G.enemies=[];
+  // ── pilares e listas de casas por sala ──
+  if(!simple){
+    for(const room of rooms){
+      if(room.kind!=='A'&&room.kind!=='B')continue;
+      const r=room.r;
+      if(r.x1-r.x0<8||r.y1-r.y0<6||Math.random()<.4)continue;
+      for(const x of [r.x0+2,r.x1-2])for(const y of [r.y0+2,r.y1-2]){const c=map[y][x];if(c.type==='floor'){c.type='wall';c.room=-1;c.wing=-2;}}
+    }
+  }
+  for(const room of rooms){
+    for(let y=room.r.y0;y<=room.r.y1;y++)for(let x=room.r.x0;x<=room.r.x1;x++)if(map[y][x].room===room.id)room.cells.push({x,y});
+    for(const c of room.cells){ // casas coladas em corredores não recebem nada (não bloquear a entrada)
+      for(const [dx,dy] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]]){
+        const n=map[c.y+dy][c.x+dx];
+        if(n.type==='floor'&&n.room!==room.id){map[c.y][c.x].nospawn=true;break;}
+      }
+    }
+  }
 
-  let allFloors=[];
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++)
-    if(map[y][x].type==='floor'&&!(x===G.pos.x&&y===G.pos.y))
-      allFloors.push({x,y,d:Math.abs(x-G.pos.x)+Math.abs(y-G.pos.y)});
-  allFloors.sort((a,b)=>b.d-a.d);
+  // ── guardiões nas 4 portas ──
+  const guards=[];
+  for(let d=0;d<4;d++){
+    const door=wings[d].door,m=map[door.y][door.x];
+    m.type='enemy';m.gate=true;
+    guards[d]={x:door.x,y:door.y,d};
+  }
 
-  let exitPos=allFloors.shift();
-  map[exitPos.y][exitPos.x].type='exit_locked';
-  allFloors.sort(()=>Math.random()-.5);
+  // ── conteúdo das alas ──
+  const specials=[];
+  const freeCells=(room,minD)=>room.cells.filter(c=>{
+    const m=map[c.y][c.x];
+    return m.type==='floor'&&!m.nospawn&&specials.every(s=>Math.max(Math.abs(s.x-c.x),Math.abs(s.y-c.y))>=minD);
+  });
+  const place=(room,type,minD=3)=>{
+    let cand=freeCells(room,minD);if(!cand.length)cand=freeCells(room,2);if(!cand.length)cand=freeCells(room,1);
+    if(!cand.length)return null;
+    const c=pickOne(cand);map[c.y][c.x].type=type;specials.push(c);return c;
+  };
+  const placeFar=(room,type)=>{
+    const cand=freeCells(room,2);
+    if(!cand.length)return place(room,type);
+    cand.sort((p,q)=>(Math.abs(q.x-cx)+Math.abs(q.y-cy))-(Math.abs(p.x-cx)+Math.abs(p.y-cy)));
+    const c=cand[0];map[c.y][c.x].type=type;specials.push(c);return c;
+  };
+  let eliteDesc=null;
+  for(let d=0;d<4;d++){
+    const w=wings[d],A=w.rooms[0],B=w.rooms[w.rooms.length-1],theme=themes[d];
+    if(theme==='loot'){place(w.closet||B,'chest',2);place(B,'chest',3);}
+    else if(theme==='elite'){const e=place(B,'elite',3);if(e)eliteDesc={x:e.x,y:e.y,room:B.id};place(w.closet||A,'chest',2);}
+    else if(theme==='rest'){place(A,'campfire',3);place(B,'merchant',3);}
+    else if(theme==='exit'){placeFar(B,'exit_locked');}
+  }
+  // inimigos comuns espalhados pelas salas das alas
+  const enemyDescs=[];
+  const wingRooms=[];wings.forEach(w=>w.rooms.forEach(r=>wingRooms.push(r)));
+  shuffleArr(wingRooms);
+  const nEn=2+G.floor;
+  for(let i=0;i<nEn;i++){
+    const room=wingRooms[i%wingRooms.length],c=place(room,'enemy',2);
+    if(c)enemyDescs.push({x:c.x,y:c.y,room:room.id});
+  }
 
-  const fk=Object.keys(FACTIONS);
+  // ── validação ──
+  const count=t=>{let n=0;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(map[y][x].type===t)n++;return n;};
+  if(count('chest')!==3||count('exit_locked')!==1||count('campfire')!==1||count('merchant')!==1||count('elite')!==1)return null;
+  const bfs=(sx,sy,pass)=>{
+    const seen=new Set([sy*W+sx]),q=[[sx,sy]];
+    while(q.length){
+      const [x,y]=q.pop();
+      for(const [dx,dy] of ORTHO){
+        const nx=x+dx,ny=y+dy,k=ny*W+nx;
+        if(nx<0||ny<0||nx>=W||ny>=H||seen.has(k)||!pass(map[ny][nx],nx,ny))continue;
+        seen.add(k);q.push([nx,ny]);
+      }
+    }
+    return seen;
+  };
+  const guardKeys=new Set(guards.map(g=>g.y*W+g.x));
+  const cellAt=k=>map[Math.floor(k/W)][k%W];
+  const blocking=new Set(['wall','chest','campfire','merchant','exit_locked']);
+  // 1) com os 4 guardiões de pé, só a sala inicial é alcançável (nenhum baú, nenhuma saída)
+  const closed=bfs(cx,cy,c=>c.type==='floor');
+  if(closed.size!==49)return null;
+  for(const k of closed)if(cellAt(k).wing!==-1)return null;
+  // 2) derrotar UM guardião libera somente a ala dele, e ela inteira fica acessível
+  for(let d=0;d<4;d++){
+    const gk=guards[d].y*W+guards[d].x;
+    const reach=bfs(cx,cy,(c,x,y)=>{const k=y*W+x;if(guardKeys.has(k))return k===gk;return !blocking.has(c.type);});
+    for(const k of reach){const wg=cellAt(k).wing;if(wg!==-1&&wg!==d)return null;}
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+      const c=map[y][x];
+      if(c.wing!==d||c.type==='wall')continue;
+      if(c.type==='chest'||c.type==='campfire'||c.type==='merchant'||c.type==='exit_locked'){
+        if(!ORTHO.some(([dx,dy])=>reach.has((y+dy)*W+x+dx)))return null;
+      }else if(!reach.has(y*W+x))return null;
+    }
+  }
+  return {map,rooms,wings,themes,cx,cy,guards,enemyDescs,eliteDesc};
+}
+
+function makeEnemy(faction,x,y,opts){
   const tk=Object.keys(ETYPES).filter(k=>!ETYPES[k].elite);
-  let ec=3+G.floor*2,placed=0;
-  for(let i=0;i<ec&&allFloors.length>0;i++){
-    let pos=allFloors.pop();
-    let faction=fk[i%3];
-    let avail=tk.filter(k=>ETYPES[k].faction===faction&&ETYPES[k].diff<=Math.min(3,G.floor+1));
-    if(!avail.length)avail=tk.filter(k=>ETYPES[k].faction===faction);
-    let t=ETYPES[avail[Math.floor(Math.random()*avail.length)]];
-    let hp=t.hp+(G.floor-1)*2;
-    let bpi=Math.floor(Math.random()*3);
-    let pool=FACTION_BASE_PATTERNS[t.faction]||FACTION_BASE_PATTERNS.blades;
-    G.enemies.push({x:pos.x,y:pos.y,hp,maxhp:hp,gold:t.gold+G.floor,
-      faction:t.faction,name:t.name,icon:t.icon,
-      patrolDir:Math.floor(Math.random()*4),elite:false,diff:t.diff,
-      atk:orientPattern(pool[bpi],0,false),basePatIdx:bpi,lastOrient:'0,0',
-      stunned:0,eliteDmg:1});
-    map[pos.y][pos.x].type='enemy';placed++;
-  }
-  G.totalEnemies=placed;G.killedEnemies=0;
+  let avail=tk.filter(k=>ETYPES[k].faction===faction&&ETYPES[k].diff<=Math.min(3,G.floor+1));
+  if(!avail.length)avail=tk.filter(k=>ETYPES[k].faction===faction);
+  const t=ETYPES[pickOne(avail)];
+  const hp=t.hp+(G.floor-1)*2,bpi=rndInt(0,2),pool=FACTION_BASE_PATTERNS[t.faction]||FACTION_BASE_PATTERNS.blades;
+  return Object.assign({x,y,hp,maxhp:hp,gold:t.gold+G.floor,faction:t.faction,name:t.name,icon:t.icon,
+    patrolDir:rndInt(0,3),elite:false,diff:t.diff,atk:orientPattern(pool[bpi],0,false),basePatIdx:bpi,
+    lastOrient:'0,0',stunned:0,eliteDmg:1},opts||{});
+}
 
-  if(allFloors.length>2){
-    let pos=allFloors.pop();
-    let elist=['bladechamp','ironmonk','bloodaxe'];
-    let et=ETYPES[elist[Math.floor(Math.random()*elist.length)]];
-    let bpi=Math.floor(Math.random()*3);
-    let epool=FACTION_BASE_PATTERNS[et.faction]||FACTION_BASE_PATTERNS.blades;
-    G.enemies.push({x:pos.x,y:pos.y,hp:et.hp,maxhp:et.hp,gold:et.gold,
-      faction:et.faction,name:et.name,icon:et.icon,
+function generateFloor(){
+  let layout=null;
+  for(let i=0;i<120&&!layout;i++)layout=tryBuildFloor(i>=60);
+  if(!layout){console.error('Falha ao gerar mapa; tentando plano B');for(let i=0;i<500&&!layout;i++)layout=tryBuildFloor(true);}
+  const {map,cx,cy,guards,enemyDescs,eliteDesc}=layout;
+  G.map=map;G.mapW=MAP_W;G.mapH=MAP_H;G.pos={x:cx,y:cy};G.enemies=[];
+
+  // guardiões: um por porta, sempre parados; as 3 facções aparecem
+  const gf=shuffleArr(['blades','maces','axes',pickOne(['blades','maces','axes'])]);
+  guards.forEach((gd,i)=>G.enemies.push(makeEnemy(gf[i],gd.x,gd.y,{guard:true,guardDir:DIR_NAMES[gd.d],room:-1,patrolDir:0})));
+  // inimigos comuns patrulham apenas a própria sala
+  const wf=shuffleArr(['blades','maces','axes']);
+  enemyDescs.forEach((ed,i)=>G.enemies.push(makeEnemy(wf[i%3],ed.x,ed.y,{room:ed.room})));
+  G.totalEnemies=guards.length+enemyDescs.length;G.killedEnemies=0;
+
+  if(eliteDesc){
+    const et=ETYPES[pickOne(['bladechamp','ironmonk','bloodaxe'])];
+    const bpi=rndInt(0,2),epool=FACTION_BASE_PATTERNS[et.faction]||FACTION_BASE_PATTERNS.blades;
+    G.enemies.push({x:eliteDesc.x,y:eliteDesc.y,hp:et.hp,maxhp:et.hp,gold:et.gold,
+      faction:et.faction,name:et.name,icon:et.icon,room:eliteDesc.room,
       patrolDir:0,elite:true,diff:et.diff,eliteBonus:et.eliteBonus,itemDrop:et.itemDrop,
       atk:orientPattern(epool[bpi],0,false),basePatIdx:bpi,lastOrient:'0,0',
       stunned:0,eliteDmg:et.eliteDmg||2});
-    map[pos.y][pos.x].type='elite';
   }
-  for(let i=0;i<3&&allFloors.length>0;i++){let p=allFloors.pop();map[p.y][p.x].type='chest';}
-  // Non-combat map events are placed toward opposite corners of the explored dungeon.
-  placeMapEvent('campfire',{x:1,y:H-2});
-  placeMapEvent('merchant',{x:W-2,y:1});
-  updateFOV();G.bossFloor=false;
+  G.bossFloor=false;
+  updateFOV();
+  log('Andar '+G.floor+': a câmara tem quatro portas e cada uma é guardada. Nenhum tesouro é alcançável sem vencer um guardião.','info');
 }
-
-function placeMapEvent(type,corner){
-  let best=null,bestD=Infinity;
-  for(let y=1;y<G.mapH-1;y++)for(let x=1;x<G.mapW-1;x++){
-    if(G.map[y][x].type!=='floor')continue;
-    let d=Math.abs(x-corner.x)+Math.abs(y-corner.y);
-    if(d<bestD){best={x,y};bestD=d;}
-  }
-  if(best)G.map[best.y][best.x].type=type;
-}
-
 
 function spawnBossFloor(){
   clearTimer();G.bossFloor=true;
@@ -959,12 +1123,27 @@ function spawnBossFloor(){
 }
 
 function updateFOV(){
-  let{pos,map,mapW,mapH}=G;
+  const{pos,map,mapW,mapH}=G;
   for(let y=0;y<mapH;y++)for(let x=0;x<mapW;x++)map[y][x].visible=false;
-  for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){
-    let nx=pos.x+dx,ny=pos.y+dy;
-    if(nx>=0&&nx<mapW&&ny>=0&&ny<mapH&&Math.abs(dx)+Math.abs(dy)<=5)
-      {map[ny][nx].visible=true;map[ny][nx].visited=true;}
+  const R=6;
+  // paredes e guardiões vivos bloqueiam a visão (o guardião funciona como um portão)
+  const opaque=(x,y)=>{const c=map[y][x];return c.type==='wall'||(c.gate&&c.type==='enemy');};
+  const mark=(x,y)=>{map[y][x].visible=true;map[y][x].visited=true;};
+  mark(pos.x,pos.y);
+  for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){
+    if(dx*dx+dy*dy>R*R+2)continue;
+    const tx=pos.x+dx,ty=pos.y+dy;
+    if(tx<0||ty<0||tx>=mapW||ty>=mapH)continue;
+    const sx=dx>0?1:-1,sy=dy>0?1:-1,ax=Math.abs(dx),ay=Math.abs(dy);
+    let err=ax-ay,x=pos.x,y=pos.y,seen=true;
+    while(!(x===tx&&y===ty)){
+      const e2=2*err;
+      if(e2>-ay){err-=ay;x+=sx;}
+      if(e2<ax){err+=ax;y+=sy;}
+      if(x===tx&&y===ty)break;
+      if(opaque(x,y)){seen=false;break;}
+    }
+    if(seen)mark(tx,ty);
   }
 }
 
@@ -973,7 +1152,7 @@ function startEnemyPatrol(){
     if(G.inCombat||!G.map)return;
     let moved=false;
     for(let e of G.enemies){
-      if(e.isBoss)continue;
+      if(e.isBoss||e.guard)continue;
       const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
       let tries=[dirs[e.patrolDir%4],...dirs.filter((_,i)=>i!==e.patrolDir%4).sort(()=>Math.random()-.5)];
       for(let[dx,dy]of tries){
@@ -981,7 +1160,7 @@ function startEnemyPatrol(){
         if(nx<1||nx>=G.mapW-1||ny<1||ny>=G.mapH-1)continue;
         let cell=G.map[ny][nx];
         let tt=e.elite?'elite':'enemy';
-        if(cell.type==='floor'&&!(nx===G.pos.x&&ny===G.pos.y)){
+        if(cell.type==='floor'&&(e.room===undefined||cell.room===e.room)&&!(nx===G.pos.x&&ny===G.pos.y)){
           G.map[e.y][e.x].type='floor';e.x=nx;e.y=ny;G.map[ny][nx].type=tt;
           e.patrolDir=(e.patrolDir+(Math.random()<.5?0:1))%4;moved=true;break;
         }
@@ -1028,21 +1207,44 @@ function showRoundSummary(result){
     ?'Próxima rodada de ataque'
     :'Prepare-se para atacar';
   document.getElementById('round-summary-content').innerHTML=result
-    ?`<p>Na rodada passada, você causou <b style="color:var(--green-l)">${result.given} dano</b> e recebeu <b style="color:var(--red-l)">${result.taken} dano</b>.</p><p>${result.note}</p><p style="font-size:11px">O cronômetro só começa depois que você confirmar.</p>`
+    ?`<p>Na rodada passada, você causou <b style="color:var(--green-l)">${result.given} dano</b> e recebeu <b style="color:var(--red-l)">${result.taken} dano</b>.</p>${resultGridHtml(result)}${result.extra?'<p>'+result.extra+'</p>':''}<p>${result.note}</p><p style="font-size:11px">O cronômetro só começa depois que você confirmar.</p>`
     :'<p>Observe o campo inimigo e posicione sua arma. O cronômetro começará apenas após sua confirmação.</p>';
   openModal('round-summary');
+}
+function resultGridHtml(r){
+  if(!r||!r.atk)return '';
+  let cells='';
+  for(let i=0;i<9;i++){
+    let atk=r.atk[i],on=r.grid&&r.grid[i],part=r.partIdx&&r.partIdx[i],cls='rs-cell',txt='';
+    if(atk&&r.stunned){cls+=' stun';txt='💫';}
+    else if(atk&&(r.shield||(on&&part!=='grip'))){cls+=' cov';txt='🛡';}
+    else if(atk){cls+=' atk';txt='💥';}
+    else if(on){cls+=part==='grip'?' grip':part==='tip'?' tip':' wpn';txt=part==='grip'?'✦':part==='tip'?'★':'⚔';}
+    cells+=`<div class="${cls}">${txt}</div>`;
+  }
+  return `<div style="font-size:11px;color:var(--text3);margin-top:6px">O que o inimigo fez${r.label?' ('+r.label+')':''}:</div><div class="rs-grid">${cells}</div><div class="rs-legend">💥 te atingiu · 🛡 bloqueado · 💫 atordoado · ★ ponta · ⚔ lâmina · ✦ cabo</div>`;
 }
 function beginAttackRound(){
   let cs=G.CS;if(!cs||!G.inCombat)return;
   prepareEnemyAttack();cs.awaitingRound=false;closeModal('round-summary');renderCombat();startTurnTimer();
 }
+// Névoa: só parte das 9 casas do campo inimigo é revelada (antes, as casas vazias eram
+// sempre reveladas, então os "?" apontavam exatamente onde estavam os ataques).
+const FOG_REVEAL=5;   // casas reveladas por rodada (≥2 delas são ataques, quando existirem)
+const COMBO_MAX=2;    // bônus máximo de dano por acertos limpos consecutivos
 function prepareEnemyAttack(){
   let cs=G.CS,en=G.combatEnemy;if(!cs||!en)return;
   en.atk=applyEnemyOrientation(en);
-  let active=en.atk.map((v,i)=>v?i:-1).filter(i=>i>=0);
   cs.fogLifted=false;cs.revealedSlots=new Set();
-  en.atk.forEach((v,i)=>{if(!v)cs.revealedSlots.add(i);});
-  active.sort(()=>Math.random()-.5).slice(0,2).forEach(i=>cs.revealedSlots.add(i));
+  let active=[],inactive=[];
+  en.atk.forEach((v,i)=>(v?active:inactive).push(i));
+  shuffleArr(active);
+  let sure=Math.min(2,active.length);
+  active.slice(0,sure).forEach(i=>cs.revealedSlots.add(i));
+  let rest=shuffleArr([...active.slice(sure),...inactive]);
+  let reveal=Math.min(9,FOG_REVEAL+(cs.insight||0));
+  rest.slice(0,Math.max(0,reveal-sure)).forEach(i=>cs.revealedSlots.add(i));
+  cs.insight=0;
 }
 
 // ─────────────────────────────────────────────
@@ -1071,23 +1273,54 @@ function cellNoise(x,y,seed){
 let _torchT=0;
 function getTorch(){return 0.85+Math.sin(_torchT)*0.1+Math.sin(_torchT*2.3)*0.05;}
 
+let CAM={x:0,y:0};
+function updateCamera(){
+  const W=G.mapW,H=G.mapH;
+  CAM.x=W<=VIEW_W?-Math.floor((VIEW_W-W)/2):Math.max(0,Math.min(W-VIEW_W,G.pos.x-Math.floor(VIEW_W/2)));
+  CAM.y=H<=VIEW_H?-Math.floor((VIEW_H-H)/2):Math.max(0,Math.min(H-VIEW_H,G.pos.y-Math.floor(VIEW_H/2)));
+}
+
+function drawMinimap(ctx,CW){
+  const S=2,mw=G.mapW*S,mh=G.mapH*S,ox=CW-mw-10,oy=10;
+  ctx.save();
+  ctx.globalAlpha=.85;
+  ctx.fillStyle='rgba(4,4,10,.85)';ctx.fillRect(ox-3,oy-3,mw+6,mh+6);
+  ctx.strokeStyle='#7a5510';ctx.lineWidth=1;ctx.strokeRect(ox-2.5,oy-2.5,mw+5,mh+5);
+  const col={chest:'#c8922a',campfire:'#f0a030',merchant:'#5ab4f5',exit:'#27ae60',exit_locked:'#aaa800'};
+  for(let y=0;y<G.mapH;y++)for(let x=0;x<G.mapW;x++){
+    const c=G.map[y][x];
+    if(!c.visited&&!c.visible)continue;
+    if(c.type==='wall')continue;
+    ctx.fillStyle=col[c.type]||'#3a3858';
+    ctx.fillRect(ox+x*S,oy+y*S,S,S);
+  }
+  for(const e of G.enemies){
+    const c=G.map[e.y]&&G.map[e.y][e.x];
+    if(c&&c.visible){ctx.fillStyle=e.elite?'#f0c060':'#e74c3c';ctx.fillRect(ox+e.x*S,oy+e.y*S,S,S);}
+  }
+  ctx.fillStyle='#8fd0ff';ctx.fillRect(ox+G.pos.x*S-1,oy+G.pos.y*S-1,S+2,S+2);
+  ctx.restore();
+}
+
+let _rafPending=false;
 function renderMap(){
   if(!CTX||!G.map)return;
   _torchT+=0.05;
   const cv=document.getElementById('map-cv');
-  const W=G.mapW,H=G.mapH,CW=cv.width,CH=cv.height;
-  const TW=Math.floor(CW/W),TH=Math.floor(CH/H);
-  const ctx=CTX;
+  const CW=cv.width,CH=cv.height,ctx=CTX;
   const torch=getTorch();
+  updateCamera();
   // Background — deep void
   ctx.fillStyle='#05050a';ctx.fillRect(0,0,CW,CH);
 
-  for(let y=0;y<H;y++){
-    for(let x=0;x<W;x++){
-      let cell=G.map[y][x],px=x*TW,py=y*TH;
+  for(let vy=0;vy<VIEW_H;vy++){
+    for(let vx=0;vx<VIEW_W;vx++){
+      const x=CAM.x+vx,y=CAM.y+vy,px=vx*TS,py=vy*TS;
+      if(x<0||y<0||x>=G.mapW||y>=G.mapH){ctx.fillStyle='#04040a';ctx.fillRect(px,py,TS,TS);continue;}
+      let cell=G.map[y][x];
       // Undiscovered — pure darkness
       if(!cell.visible&&!cell.visited){
-        ctx.fillStyle='#04040a';ctx.fillRect(px,py,TW,TH);
+        ctx.fillStyle='#04040a';ctx.fillRect(px,py,TS,TS);
         continue;
       }
       let dim=!cell.visible;
@@ -1095,71 +1328,60 @@ function renderMap(){
       let n=cellNoise(x,y,42);
 
       if(cell.type==='wall'){
-        // Stone wall — dark blue-grey with subtle texture variation
         let base=dim?'#0e0e1a':'#1a1828';
-        ctx.fillStyle=base;ctx.fillRect(px,py,TW,TH);
-        // Stone crack / texture overlay
+        ctx.fillStyle=base;ctx.fillRect(px,py,TS,TS);
         let shade=n*0.12;
         ctx.fillStyle=`rgba(${Math.floor(shade*80)},${Math.floor(shade*60)},${Math.floor(shade*120)},0.5)`;
-        ctx.fillRect(px+1,py+1,TW-2,Math.floor(TH*0.5));
-        // Bottom shadow (depth)
-        ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(px,py+Math.floor(TH*.6),TW,Math.floor(TH*.4));
-        // Top edge highlight
-        ctx.fillStyle='rgba(80,70,120,0.2)';ctx.fillRect(px,py,TW,1);
-        // Grid lines
-        ctx.strokeStyle='rgba(30,28,50,0.8)';ctx.lineWidth=0.5;ctx.strokeRect(px+.5,py+.5,TW-1,TH-1);
+        ctx.fillRect(px+1,py+1,TS-2,Math.floor(TS*0.5));
+        ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(px,py+Math.floor(TS*.6),TS,Math.floor(TS*.4));
+        ctx.fillStyle='rgba(80,70,120,0.2)';ctx.fillRect(px,py,TS,1);
+        ctx.strokeStyle='rgba(30,28,50,0.8)';ctx.lineWidth=0.5;ctx.strokeRect(px+.5,py+.5,TS-1,TS-1);
       } else {
-        // Floor — warm stone with slight variation
         let floorBase=n>0.5?'#151424':'#131222';
-        ctx.fillStyle=floorBase;ctx.fillRect(px,py,TW,TH);
-        // Subtle floor grain
-        if(n>0.7){ctx.fillStyle='rgba(60,50,90,0.08)';ctx.fillRect(px+2,py+2,TW-4,TH-4);}
-        // Floor edge
-        ctx.strokeStyle='rgba(35,33,58,0.4)';ctx.lineWidth=0.5;ctx.strokeRect(px+.5,py+.5,TW-1,TH-1);
+        ctx.fillStyle=floorBase;ctx.fillRect(px,py,TS,TS);
+        if(n>0.7){ctx.fillStyle='rgba(60,50,90,0.08)';ctx.fillRect(px+2,py+2,TS-4,TS-4);}
+        ctx.strokeStyle='rgba(35,33,58,0.4)';ctx.lineWidth=0.5;ctx.strokeRect(px+.5,py+.5,TS-1,TS-1);
+
+        // Porta da sala inicial (onde fica o guardião)
+        if(cell.gate){
+          ctx.fillStyle='rgba(122,85,16,.22)';ctx.fillRect(px+2,py+2,TS-4,TS-4);
+          ctx.strokeStyle='#7a5510';ctx.lineWidth=2;ctx.strokeRect(px+3,py+3,TS-6,TS-6);
+        }
 
         if(cell.type==='campfire'||cell.type==='merchant'){
-          let cx2=px+TW/2,cy2=py+TH/2;
+          let cx2=px+TS/2,cy2=py+TS/2;
           let isFire=cell.type==='campfire';
-          let glow=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TW*.65);
-          glow.addColorStop(0,isFire?'rgba(255,115,20,.38)':'rgba(100,190,255,.28)');glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(px,py,TW,TH);
-          ctx.font=`${Math.floor(Math.min(TW,TH)*.62)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(isFire?'🔥':'🧙‍♂️',cx2,cy2+1);
-          ctx.strokeStyle=isFire?'#f0a030':'#5ab4f5';ctx.lineWidth=1;ctx.strokeRect(px+2,py+2,TW-4,TH-4);
+          let glow=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TS*.65);
+          glow.addColorStop(0,isFire?'rgba(255,115,20,.38)':'rgba(100,190,255,.28)');glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(px,py,TS,TS);
+          ctx.font=`${Math.floor(TS*.62)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(isFire?'🔥':'🧙‍♂️',cx2,cy2+1);
+          ctx.strokeStyle=isFire?'#f0a030':'#5ab4f5';ctx.lineWidth=1;ctx.strokeRect(px+2,py+2,TS-4,TS-4);
         } else if(cell.type==='chest'){
-          // Ornate chest
-          let cx2=px+TW/2,cy2=py+TH/2;
-          // Chest body
-          ctx.fillStyle='#5a3a08';ctx.fillRect(cx2-TW*.3,cy2-TH*.25,TW*.6,TH*.5);
-          // Lid
-          ctx.fillStyle='#7a5010';ctx.fillRect(cx2-TW*.3,cy2-TH*.25,TW*.6,TH*.22);
-          // Gold trim
-          ctx.fillStyle='#c8922a';ctx.fillRect(cx2-TW*.3,cy2-TH*.04,TW*.6,TH*.06);
+          let cx2=px+TS/2,cy2=py+TS/2;
+          ctx.fillStyle='#5a3a08';ctx.fillRect(cx2-TS*.3,cy2-TS*.25,TS*.6,TS*.5);
+          ctx.fillStyle='#7a5010';ctx.fillRect(cx2-TS*.3,cy2-TS*.25,TS*.6,TS*.22);
+          ctx.fillStyle='#c8922a';ctx.fillRect(cx2-TS*.3,cy2-TS*.04,TS*.6,TS*.06);
           ctx.fillStyle='#c8922a';ctx.strokeStyle='#f0c060';ctx.lineWidth=0.8;
-          ctx.strokeRect(cx2-TW*.3,cy2-TH*.25,TW*.6,TH*.5);
-          // Lock
-          ctx.fillStyle='#f0c060';ctx.fillRect(cx2-TW*.06,cy2-TH*.06,TW*.12,TH*.14);
-          // Glow
-          let grd=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TW*.5);
+          ctx.strokeRect(cx2-TS*.3,cy2-TS*.25,TS*.6,TS*.5);
+          ctx.fillStyle='#f0c060';ctx.fillRect(cx2-TS*.06,cy2-TS*.06,TS*.12,TS*.14);
+          let grd=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TS*.5);
           grd.addColorStop(0,'rgba(240,192,96,0.12)');grd.addColorStop(1,'transparent');
-          ctx.fillStyle=grd;ctx.fillRect(px,py,TW,TH);
+          ctx.fillStyle=grd;ctx.fillRect(px,py,TS,TS);
         } else if(cell.type==='exit'||cell.type==='exit_locked'){
           let locked=cell.type==='exit_locked';
-          // Portal glow
-          let cx2=px+TW/2,cy2=py+TH/2;
-          let portalColor=locked?'rgba(120,120,0,0.15)':'rgba(20,120,60,0.2)';
-          let grd=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TW*.6);
+          let cx2=px+TS/2,cy2=py+TS/2;
+          let grd=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,TS*.6);
           grd.addColorStop(0,locked?'rgba(200,200,0,0.2)':'rgba(40,200,100,0.25)');
           grd.addColorStop(1,'transparent');
-          ctx.fillStyle=grd;ctx.fillRect(px,py,TW,TH);
-          // Archway symbol
+          ctx.fillStyle=grd;ctx.fillRect(px,py,TS,TS);
           ctx.fillStyle=locked?'#6a6a00':'#1a8a40';
-          ctx.beginPath();ctx.arc(cx2,cy2,TW*.25,Math.PI,0);ctx.closePath();ctx.fill();
+          ctx.beginPath();ctx.arc(cx2,cy2,TS*.25,Math.PI,0);ctx.closePath();ctx.fill();
           ctx.fillStyle=locked?'#3a3a00':'#0d4a20';
-          ctx.fillRect(cx2-TW*.25,cy2,TW*.5,TH*.22);
+          ctx.fillRect(cx2-TS*.25,cy2,TS*.5,TS*.22);
           ctx.strokeStyle=locked?'#aaa800':'#27ae60';ctx.lineWidth=1.5;
-          ctx.beginPath();ctx.arc(cx2,cy2,TW*.25,Math.PI,0);ctx.stroke();
+          ctx.beginPath();ctx.arc(cx2,cy2,TS*.25,Math.PI,0);ctx.stroke();
           if(locked){
-            ctx.fillStyle='#c8c800';ctx.font=`${Math.floor(TH*.28)}px serif`;
-            ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('🔒',cx2,cy2+TH*.1);
+            ctx.fillStyle='#c8c800';ctx.font=`${Math.floor(TS*.28)}px serif`;
+            ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('🔒',cx2,cy2+TS*.1);
           }
         }
       }
@@ -1169,8 +1391,8 @@ function renderMap(){
 
   // Torch glow around player position (warm ambient light)
   if(G.pos){
-    let pcx=G.pos.x*TW+TW/2,pcy=G.pos.y*TH+TH/2;
-    let grd=ctx.createRadialGradient(pcx,pcy,0,pcx,pcy,TW*3.5);
+    let pcx=(G.pos.x-CAM.x)*TS+TS/2,pcy=(G.pos.y-CAM.y)*TS+TS/2;
+    let grd=ctx.createRadialGradient(pcx,pcy,0,pcx,pcy,TS*3.5);
     grd.addColorStop(0,`rgba(180,100,20,${0.08*torch})`);
     grd.addColorStop(0.5,`rgba(120,60,10,${0.04*torch})`);
     grd.addColorStop(1,'transparent');
@@ -1179,41 +1401,33 @@ function renderMap(){
 
   // Enemies
   for(let e of G.enemies){
+    if(e.x<CAM.x||e.x>=CAM.x+VIEW_W||e.y<CAM.y||e.y>=CAM.y+VIEW_H)continue;
     if(!G.map[e.y]||!G.map[e.y][e.x]||!G.map[e.y][e.x].visible)continue;
-    let f=FACTIONS[e.faction],r=Math.min(TW,TH)*.3;
-    let cx=e.x*TW+TW/2,cy=e.y*TH+TH/2;
-    // Elite aura — pulsing golden haze
+    let f=FACTIONS[e.faction],r=TS*.3;
+    let cx=(e.x-CAM.x)*TS+TS/2,cy=(e.y-CAM.y)*TS+TS/2;
     if(e.elite){
       let aura=0.15+Math.sin(_torchT*1.5)*0.05;
       let grd=ctx.createRadialGradient(cx,cy,r*.5,cx,cy,r+8);
       grd.addColorStop(0,`rgba(200,146,42,${aura})`);grd.addColorStop(1,'transparent');
       ctx.fillStyle=grd;ctx.beginPath();ctx.arc(cx,cy,r+8,0,Math.PI*2);ctx.fill();
     }
-    // Boss outer ring
     if(e.isBoss){
       let pulse=Math.sin(_torchT*2)*0.2+0.6;
       ctx.strokeStyle=`rgba(180,50,255,${pulse})`;ctx.lineWidth=2;
       ctx.beginPath();ctx.arc(cx,cy,r+5,0,Math.PI*2);ctx.stroke();
     }
-    // Shadow beneath
     ctx.fillStyle='rgba(0,0,0,0.35)';
     ctx.beginPath();ctx.ellipse(cx,cy+r+1,r*.7,r*.25,0,0,Math.PI*2);ctx.fill();
-    // Body
     ctx.fillStyle=f.dark+'cc';ctx.beginPath();ctx.arc(cx,cy,r+2,0,Math.PI*2);ctx.fill();
     ctx.fillStyle=e.elite?'#c8922a':f.color;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
-    // Highlight top
     let hgrd=ctx.createRadialGradient(cx-r*.2,cy-r*.3,0,cx,cy,r);
     hgrd.addColorStop(0,'rgba(255,255,255,0.15)');hgrd.addColorStop(1,'transparent');
     ctx.fillStyle=hgrd;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
-    // Ring
     ctx.strokeStyle=e.elite?'#f0c060':f.light;ctx.lineWidth=e.isBoss?2:1.2;ctx.stroke();
-    // Icon
     ctx.fillStyle='#fff';ctx.font=`${Math.floor(r*.85)}px serif`;
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(e.icon,cx,cy+1);
-    // Stun
     if(e.stunned>0){ctx.font='9px serif';ctx.fillText('💫',cx+r*.65,cy-r*.65);}
-    // HP bar — slim, under entity
-    let bw=TW-4,bh=3,bx2=cx-bw/2,by2=cy+r+4;
+    let bw=TS-4,bh=3,bx2=cx-bw/2,by2=cy+r+4;
     ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bx2-1,by2-1,bw+2,bh+2);
     ctx.fillStyle=e.hp/e.maxhp>0.5?'#2a8a2a':e.hp/e.maxhp>0.25?'#a06010':'#8a1a1a';
     ctx.fillRect(bx2,by2,bw*(e.hp/e.maxhp),bh);
@@ -1221,18 +1435,14 @@ function renderMap(){
   }
 
   // Player
-  let pr=Math.min(TW,TH)*.33,pcx2=G.pos.x*TW+TW/2,pcy2=G.pos.y*TH+TH/2;
-  // Shadow
+  let pr=TS*.33,pcx2=(G.pos.x-CAM.x)*TS+TS/2,pcy2=(G.pos.y-CAM.y)*TS+TS/2;
   ctx.fillStyle='rgba(0,0,0,0.4)';
   ctx.beginPath();ctx.ellipse(pcx2,pcy2+pr+1,pr*.7,pr*.25,0,0,Math.PI*2);ctx.fill();
-  // Outer glow — torch-warm
   let pgrd=ctx.createRadialGradient(pcx2,pcy2,pr*.3,pcx2,pcy2,pr+4);
   pgrd.addColorStop(0,`rgba(90,180,245,${0.3*torch})`);pgrd.addColorStop(1,'transparent');
   ctx.fillStyle=pgrd;ctx.beginPath();ctx.arc(pcx2,pcy2,pr+4,0,Math.PI*2);ctx.fill();
-  // Body
   ctx.fillStyle='#0c2040';ctx.beginPath();ctx.arc(pcx2,pcy2,pr+2,0,Math.PI*2);ctx.fill();
   ctx.fillStyle='#1a4a8a';ctx.beginPath();ctx.arc(pcx2,pcy2,pr,0,Math.PI*2);ctx.fill();
-  // Highlight
   let phgrd=ctx.createRadialGradient(pcx2-pr*.2,pcy2-pr*.3,0,pcx2,pcy2,pr);
   phgrd.addColorStop(0,'rgba(180,220,255,0.2)');phgrd.addColorStop(1,'transparent');
   ctx.fillStyle=phgrd;ctx.beginPath();ctx.arc(pcx2,pcy2,pr,0,Math.PI*2);ctx.fill();
@@ -1245,21 +1455,26 @@ function renderMap(){
   vgrd.addColorStop(0,'transparent');vgrd.addColorStop(1,'rgba(0,0,8,0.6)');
   ctx.fillStyle=vgrd;ctx.fillRect(0,0,CW,CH);
 
-  // Torch flicker — animate only when map is visible, not in combat
-  if(!G.inCombat&&document.getElementById('main-view').style.display!=='none')
-    requestAnimationFrame(()=>{if(!G.inCombat&&CTX)renderMap();});
+  if(!G.bossFloor)drawMinimap(ctx,CW);
+
+  // Torch flicker — um único loop de animação (antes cada renderAll criava mais um loop)
+  if(!G.inCombat&&!_rafPending&&document.getElementById('main-view').style.display!=='none'){
+    _rafPending=true;
+    requestAnimationFrame(()=>{_rafPending=false;if(!G.inCombat&&CTX&&G.map)renderMap();});
+  }
 }
 
 // ─────────────────────────────────────────────
 // MOVEMENT & INTERACTION
 // ─────────────────────────────────────────────
 document.getElementById('map-cv').addEventListener('click',function(e){
-  if(G.inCombat)return;
+  if(G.inCombat||!G.map)return;
   let r=this.getBoundingClientRect();
   let mx=(e.clientX-r.left)*(this.width/r.width);
   let my=(e.clientY-r.top)*(this.height/r.height);
-  let tx=Math.floor(mx/(this.width/G.mapW));
-  let ty=Math.floor(my/(this.height/G.mapH));
+  updateCamera();
+  let tx=Math.floor(mx/TS)+CAM.x;
+  let ty=Math.floor(my/TS)+CAM.y;
   if(tx<0||tx>=G.mapW||ty<0||ty>=G.mapH)return;
   handleTile(tx,ty);
 });
@@ -1364,7 +1579,7 @@ function startCombat(enemy){
   G.wpnOffset=0;G.wpnOffsetY=0;G.wpnMirrored=false;G.wpnRot=0;
 
   // The upcoming attack is only generated after the player starts the round.
-  G.CS={turn:1,action:'attack',shieldCD:0,revealedSlots:new Set(),fogLifted:false,awaitingRound:true};
+  G.CS={turn:1,action:'attack',shieldCD:0,revealedSlots:new Set(),fogLifted:false,awaitingRound:true,combo:0,insight:0};
 
   // Stop RAF loop before entering combat
   hide('main-view');show('combat-view');
@@ -1448,10 +1663,11 @@ function rotateWeapon(){
 // Covered attacks are reduced by the weapon defense multiplier; grips never cover.
 // Returns damage totals and the explanation breakdown displayed in combat.
 // cleanHit = player wins > player losses (majority of active weapon slots win)
-function calcAttack(enemy){
+function calcAttack(enemy,onlyRevealed){
   let w=WPN_BASE[G.weapon];
   let {grid,partIdx,outSlots}=buildGrid(G.weapon,G.wpnOffset,G.wpnMirrored,G.wpnRot,G.wpnOffsetY);
-  let enmSet=new Set(enemy.atk.map((v,i)=>v?i:-1).filter(i=>i>=0));
+  let cs0=G.CS;
+  let enmSet=new Set(enemy.atk.map((v,i)=>v?i:-1).filter(i=>i>=0&&(!onlyRevealed||!cs0||cs0.fogLifted||cs0.revealedSlots.has(i))));
   let wpnSlots=grid.map((v,i)=>v?i:-1).filter(i=>i>=0);
   let eDmgMult=enemy.elite?(enemy.eliteDmg||2):1;
 
@@ -1482,17 +1698,20 @@ function calcAttack(enemy){
   // Clean hit = wins (weapon slots) > losses (uncovered enemy slots)
   let attackDebuff=outSlots;
   let multipliedDamage=Math.ceil(rawDamage*w.attackMultiplier);
-  let playerDmg=Math.max(0,multipliedDamage-attackDebuff);
+  let baseDmg=Math.max(0,multipliedDamage-attackDebuff);
+  let comboBonus=(cs0&&baseDmg>0)?Math.min(COMBO_MAX,cs0.combo||0):0;
+  let playerDmg=baseDmg+comboBonus;
   let enemyDmg=Math.ceil(incomingRaw);
   let cleanHit=wins>losses&&rawDamage>0;
-  return {playerDmg,rawDamage,multipliedDamage,enemyDmg,incomingRaw,attackDebuff,cleanHit,outSlots,grid,partIdx,tipCount,midCount,gripCount,coveredEnemySlots,exposedEnemySlots:uncoveredEnemySlots,enemySlotDamage:eDmgMult};
+  return {comboBonus,playerDmg,rawDamage,multipliedDamage,enemyDmg,incomingRaw,attackDebuff,cleanHit,outSlots,grid,partIdx,tipCount,midCount,gripCount,coveredEnemySlots,exposedEnemySlots:uncoveredEnemySlots,enemySlotDamage:eDmgMult};
 }
 
 function renderCombat(){
   let cs=G.CS,en=G.combatEnemy;if(!cs||!en)return;
   let w=WPN_BASE[G.weapon];
 
-  document.getElementById('phase-ind').textContent=`Turno ${cs.turn} — escolha ação e resolva`;
+  document.getElementById('phase-ind').textContent=`Turno ${cs.turn}${en.patternLabel?' — '+en.patternLabel:''}${cs.combo?' · 🔥 Combo ×'+cs.combo:''}`;
+  document.getElementById('cv-sub').textContent=`${en.guard?'Guardião da porta '+en.guardDir+' · ':''}${FACTIONS[en.faction].name} · HP: ${en.hp}/${en.maxhp} · Recompensa: ${en.gold} ouro`;
   document.getElementById('combat-hp').textContent=G.hp+'/'+G.maxhp;
   document.getElementById('turn-num').textContent=cs.turn;
 
@@ -1510,6 +1729,7 @@ function renderCombat(){
       <div style="font-size:12px;font-weight:700;color:${FACTIONS[en.faction].light}">${en.name}</div>
       <div style="font-size:10px;color:var(--text3);margin-top:2px">${en.hp}/${en.maxhp} HP</div>
       <div class="ehpb"><div class="ehpf" style="width:${Math.max(0,en.hp/en.maxhp*100)}%"></div></div>
+      ${en.patternLabel?`<div style="font-size:10px;color:var(--blue-l);margin-top:4px">${en.patternLabel}</div>`:''}
       ${en.stunned>0?`<div style="font-size:10px;color:#f0a030;margin-top:4px;font-weight:700">💫 Atordoado (${en.stunned}t)</div>`:''}
     </div>`;
 
@@ -1517,22 +1737,24 @@ function renderCombat(){
 
   if(cs.action!=='attack')return;
 
-  // Damage preview
-  let {playerDmg,rawDamage,multipliedDamage,enemyDmg,incomingRaw,attackDebuff,cleanHit,grid,partIdx,tipCount,midCount,gripCount,coveredEnemySlots,exposedEnemySlots,enemySlotDamage}=calcAttack(en);
+  // Damage preview — o lado inimigo usa só o que a névoa revelou
+  let {playerDmg,rawDamage,multipliedDamage,enemyDmg,incomingRaw,attackDebuff,cleanHit,grid,partIdx,tipCount,midCount,gripCount,coveredEnemySlots,exposedEnemySlots,enemySlotDamage,comboBonus}=calcAttack(en,true);
+  let hidden=cs.fogLifted?0:9-cs.revealedSlots.size;
   document.getElementById('dmg-p').textContent=
-    playerDmg+(attackDebuff>0?' (−'+attackDebuff+' dano fora)':'')+(cleanHit?' ★LIMPO':'');
-  document.getElementById('dmg-e').textContent=en.stunned>0?'0 (atordoado)':String(enemyDmg);
+    playerDmg+(attackDebuff>0?' (−'+attackDebuff+' fora)':'')+(comboBonus?' 🔥+'+comboBonus:'')+(cleanHit?(hidden?' ★limpo?':' ★LIMPO'):'');
+  document.getElementById('dmg-e').textContent=en.stunned>0?'0 (atordoado)':(hidden?'≥ '+enemyDmg+' (+?)':String(enemyDmg));
   let playerParts=[];
   if(tipCount)playerParts.push(`<span class="tip">${tipCount} ponta${tipCount>1?'s':''} × ${w.dmg+1}</span>`);
   if(midCount)playerParts.push(`<span class="mid">${midCount} meio${midCount>1?'s':''} × ${w.dmg}</span>`);
   if(gripCount)playerParts.push(`<span class="grip">${gripCount} cabo${gripCount>1?'s':''} × 0</span>`);
   let enemyFormula=en.stunned
     ?'<span class="mid">Inimigo atordoado: 0 dano recebido.</span>'
-    :`<span class="hurt">${exposedEnemySlots} exposto${exposedEnemySlots!==1?'s':''} × ${enemySlotDamage} + ${coveredEnemySlots} coberto${coveredEnemySlots!==1?'s':''} × ${Math.round((1-w.defenseMultiplier)*100)}% = ${incomingRaw.toFixed(2)} → ${enemyDmg} recebido</span>`;
-  document.getElementById('damage-explain').innerHTML=`<b>Você:</b> ${playerParts.join(' + ')} = ${rawDamage} × ${Math.round(w.attackMultiplier*100)}% = ${multipliedDamage}${attackDebuff?` − ${attackDebuff} fora do grid`:''} → <b>${playerDmg} dano</b><br><b>Inimigo:</b> ${enemyFormula}`;
+    :`<span class="hurt">${exposedEnemySlots} exposto${exposedEnemySlots!==1?'s':''} × ${enemySlotDamage} + ${coveredEnemySlots} coberto${coveredEnemySlots!==1?'s':''} × ${Math.round((1-w.defenseMultiplier)*100)}% = ${incomingRaw.toFixed(2)} → ${enemyDmg} (só ataques visíveis)</span>${hidden?` <span class="tip">· ${hidden} casa${hidden>1?'s':''} oculta${hidden>1?'s':''} (?) pode${hidden>1?'m':''} esconder ataques</span>`:''}`;
+  document.getElementById('damage-explain').innerHTML=`<b>Você:</b> ${playerParts.join(' + ')} = ${rawDamage} × ${Math.round(w.attackMultiplier*100)}% = ${multipliedDamage}${attackDebuff?` − ${attackDebuff} fora do grid`:''}${comboBonus?` + ${comboBonus} combo`:''} → <b>${playerDmg} dano</b><br><b>Inimigo:</b> ${enemyFormula}`;
 
   // Fog label
   document.getElementById('fog-lbl').style.display=cs.fogLifted?'none':'';
+  document.getElementById('fog-lbl').textContent='(névoa: '+cs.revealedSlots.size+'/9 visíveis)';
 
   // Player grid
   let enmSet=new Set(en.atk.map((v,i)=>v?i:-1).filter(i=>i>=0));
@@ -1565,7 +1787,7 @@ function renderCombat(){
     let revealed=cs.revealedSlots.has(i)||cs.fogLifted;
     let cls='cell9';
     let content='';
-    if(!revealed&&eOn){cls+=' c-fog';content='<div class="ci" style="color:#16163a">?</div>';}
+    if(!revealed){cls+=' c-fog';content='<div class="ci" style="color:#2c2c60">?</div>';}
     else if(eOn){cls+=' c-enemy';content=`<div class="ci">${en.icon}</div><div class="cl">ataque</div>`;}
     else cls+=' c-empty';
     d.className=cls;d.innerHTML=content;d.style.cursor='default';
@@ -1586,11 +1808,13 @@ function resolveRound(timedOut=false){
     cs.shieldCD=3;
     clog('🛡 Escudo! '+blocked+' ataque(s) bloqueado(s). +1 vida. Cooldown 3 turnos.','good');
     roundResult.note='Você usou o escudo e bloqueou todos os ataques deste turno.';
+    roundResult.atk=[...en.atk];roundResult.shield=true;roundResult.label=en.patternLabel;
   } else {
-    let {playerDmg,enemyDmg,attackDebuff,cleanHit,outSlots}=calcAttack(en);
+    let {playerDmg,enemyDmg,attackDebuff,cleanHit,outSlots,grid,partIdx}=calcAttack(en);
     let actualEDmg=en.stunned>0?0:enemyDmg;
     let totalDmgToPlayer=actualEDmg;
-    roundResult={given:playerDmg,taken:totalDmgToPlayer,note:timedOut?'O tempo terminou; a posição atual da arma foi usada.':'Confira o novo padrão inimigo antes de continuar.'};
+    roundResult={given:playerDmg,taken:totalDmgToPlayer,note:timedOut?'O tempo terminou; a posição atual da arma foi usada.':'Confira o novo padrão inimigo antes de continuar.',
+      atk:[...en.atk],grid,partIdx,stunned:en.stunned>0,label:en.patternLabel};
 
     en.hp-=playerDmg;
     G.hp=Math.max(0,G.hp-totalDmgToPlayer);
@@ -1603,6 +1827,12 @@ function resolveRound(timedOut=false){
     else if(!en.stunned)clog('Sem dano inimigo (todos os ataques cobertos!).','good');
     if(en.stunned>0)clog('Inimigo atordoado — sem ataque.','good');
 
+    // Combo: acertos limpos em sequência aumentam o dano e revelam mais casas na rodada seguinte
+    if(cleanHit&&playerDmg>0){
+      cs.combo=Math.min(COMBO_MAX,(cs.combo||0)+1);cs.insight=2;
+      clog('🔥 Combo ×'+cs.combo+'! Mais dano nos próximos acertos limpos e mais visão do inimigo.','good');
+      roundResult.extra='Acerto limpo! Combo ×'+cs.combo+' e mais casas reveladas na próxima rodada.';
+    } else if(cs.combo){cs.combo=0;clog('Combo perdido.','bad');}
     // Weapon specials on clean hit
     if(!defeatedByEnemy&&cleanHit&&w.special){
       if(w.special==='stun'){en.stunned=1;clog('ATORDOADO! '+en.name+' perde o próximo turno.','good');}
